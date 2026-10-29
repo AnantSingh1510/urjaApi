@@ -1,23 +1,23 @@
 # Reflection
 
-AI assistance was used for the portal investigation, implementation, tests and this write-up.
+AI assistance was used for the portal investigation, implementation and this write-up.
 
 ## What assumptions did you make?
 
-The export became the catalog source after its count matched both its own `total` and the meter list. Network codes identify nodes within a level; names can change or disagree. The readings look cumulative and arrive at 30-minute intervals, so consumption comes from adjacent differences. `Asia/Kolkata` is an assumption because the timestamps have no offset. The June readings found during an October inspection also meant cache age had to stay separate from measurement age.
+Meter IDs identify records, while hierarchy names can disagree or change. The increasing kWh/kVAh values look like cumulative registers, so consumption comes from adjacent differences. The timestamp timezone is assumed to be `Asia/Kolkata`. The API returns the portal's default reading window, which was in June even though the investigation happened in October.
 
 ## Which part was most difficult, and how did you get unstuck?
 
-Finding the useful data path took the most investigation. The initial HTML had an empty meter table, and the detail pages had two nameplate formats. The JavaScript linked by those pages revealed the JSON calls. The Transformers page then led to the signed bulk export, including the signing procedure. That one export replaced hundreds of possible detail requests. The remaining complication was the hierarchy: repeated codes with different parents meant a tree would lose information, so the API returns a graph with conflicts attached.
+Finding the data behind the pages took the most investigation. The initial HTML had no meter rows, and the detail pages used two different formats. The linked JavaScript exposed the JSON routes and the export signing procedure. That export provided one consistent detail format without needing two page parsers.
 
 ## If you had another day, what would you improve?
 
-First, establish whether the portal supports date-range requests and observe a real session/key expiry. Those gaps matter more than another endpoint. More meter samples would help test the assumptions about cadence and register resets. After that, add refresh metrics and source timestamps, then persistence and spatial indexes if the dataset needs them. A UI could make the conflicting network relationships and missing intervals easier to inspect.
+First, verify whether the portal supports historical date ranges and confirm the register interpretation on more meters. After that, caching would reduce repeated logins and export downloads. Those changes need evidence about the portal's behavior before adding more endpoints or infrastructure.
 
 ## What mistake did you make while solving this?
 
-The first HTTP request didn't follow the redirect and returned an empty body. Following it reached the login page, but even after login the meter HTML still had no rows. The populated browser view showed why: the page loads records after hydration. That was a useful correction to the initial inspection approach. Python's local certificate setup caused another tooling failure; curl worked with verification enabled, and the final HTTPX setup passed live checks with its certificate bundle. Neither problem came from an empty or broken portal.
+The initial request didn't follow the login redirect and returned an empty body. After authentication, the meter HTML still had no rows. The populated browser view made the cause clear: records arrive after hydration. The inspection needed to follow the page's data requests instead of treating the HTML as the complete response.
 
-## If you were reviewing this submission, what would you criticise?
+## If you were reviewing your own submission, what would you criticise?
 
-The biggest weakness is how much depends on an undocumented protocol and a small sample of live readings. Historical retrieval remains unverified. If the export starts paginating, the service fails rather than adapting automatically. Serial portal requests and per-process caches keep the implementation manageable, but they'll limit throughput. The graph reports contradictions without resolving them, and the consumption figures shouldn't be used for billing without confirming the register semantics and handling meter multipliers.
+Fetching the export for each detail request is inefficient, and logging in for each request adds latency. The service depends on undocumented routes and only supports the default energy window. The consumption calculation also relies on assumptions that need wider verification before anyone uses it for billing. Keeping those limits visible is preferable to hiding them behind a larger implementation.

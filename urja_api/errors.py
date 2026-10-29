@@ -7,4 +7,6 @@ class ServiceError(Exception):
 
 
 def protocol_error() -> ServiceError:
-    return ServiceError("upstream_protocol_error", "Portal returned an unexpected data format.")
+    return ServiceError(
+        "upstream_protocol_error", "Portal returned an unexpected data format."
+    )

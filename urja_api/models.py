@@ -4,7 +4,9 @@ from typing import Generic, Literal, TypeVar
 from pydantic import BaseModel, ConfigDict, Field
 
 LEVELS = ("zone", "circle", "division", "subdivision", "substation", "feeder", "dt")
-Level = Literal["zone", "circle", "division", "subdivision", "substation", "feeder", "dt"]
+Level = Literal[
+    "zone", "circle", "division", "subdivision", "substation", "feeder", "dt"
+]
 
 
 class Model(BaseModel):
@@ -28,35 +30,21 @@ class HierarchyEntry(Model):
     name: str | None
 
 
-class Meter(Model):
+class MeterSummary(Model):
     id: str
     serial_number: str | None
     make: str | None
     phase: str | None
     installation_status: str | None
-    installation_type: str | None
     transformer_code: str | None
+
+
+class Meter(MeterSummary):
+    installation_type: str | None
     source_build: str | None
     location: Geo | None
     hierarchy: list[HierarchyEntry]
     issues: list[Issue] = Field(default_factory=list)
-
-
-class MeterResult(Meter):
-    distance_km: float | None = None
-
-
-class Transformer(Model):
-    code: str
-    name: str | None
-    feeder_code: str | None
-    capacity_kva: float | None
-
-
-class Freshness(Model):
-    fetched_at: datetime
-    expires_at: datetime
-    source: Literal["portal", "synthetic_demo"]
 
 
 T = TypeVar("T")
@@ -64,15 +52,13 @@ T = TypeVar("T")
 
 class Envelope(Model, Generic[T]):
     data: T
-    freshness: Freshness
 
 
-class Page(Model, Generic[T]):
-    data: list[T]
+class MeterPage(Model):
+    data: list[MeterSummary]
     total: int
-    offset: int
-    limit: int
-    freshness: Freshness
+    page: int
+    page_size: int
 
 
 class Reading(Model):
@@ -83,7 +69,7 @@ class Reading(Model):
     voltage_r_v: float | None
     interval_kwh: float | None = Field(
         default=None,
-        description="Difference from previous valid 30-minute reading in the returned window. "
+        description="Difference from the previous valid 30-minute reading. "
         "Null for the first reading, missing data, resets, duplicates, or gaps.",
     )
     issues: list[Issue] = Field(default_factory=list)
@@ -92,53 +78,14 @@ class Reading(Model):
 class Readings(Model):
     meter_id: str
     timezone: str
-    scope: str = "portal_default_window"
     available_from: datetime | None
     available_to: datetime | None
     data: list[Reading]
-    total: int
-    offset: int
-    limit: int
-    valid_interval_kwh: float
-    valid_intervals: int
-    excluded_intervals: int
-    freshness: Freshness
-    notes: list[str]
-
-
-class NetworkNode(Model):
-    id: str
-    level: Level
-    code: str | None
-    names: list[str]
-    parent_ids: list[str]
-    meter_count: int
-
-
-class Network(Model):
-    nodes: list[NetworkNode]
-    issues: list[Issue]
-    freshness: Freshness
-
-
-class Summary(Model):
-    meters: int
-    transformers: int
-    meters_by_status: dict[str, int]
-    meters_by_make: dict[str, int]
-    meters_with_issues: int
-    network_issues: int
-    freshness: Freshness
-
-
-class Health(Model):
-    status: str = "ok"
 
 
 class ErrorDetail(Model):
     code: str
     message: str
-    request_id: str
 
 
 class ErrorResponse(Model):
