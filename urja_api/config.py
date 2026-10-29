@@ -6,7 +6,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="URJA_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="URJA_", env_file=".env", extra="ignore", hide_input_in_errors=True
+    )
     demo: bool = False
     base_url: str = "https://urja-ops.flockenergy.tech"
     username: str = ""

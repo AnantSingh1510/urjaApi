@@ -124,7 +124,9 @@ class PortalClient:
             if signed:
                 if self._secret is None:
                     keys = await self._get_locked("/portal/keys")
-                    secret = keys.get("data", {}).get("signingSecret")
+                    if not isinstance(keys.get("data"), dict):
+                        raise protocol_error()
+                    secret = keys["data"].get("signingSecret")
                     if not isinstance(secret, str) or not secret:
                         raise protocol_error()
                     self._secret = secret
