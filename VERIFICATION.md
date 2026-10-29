@@ -1,52 +1,46 @@
-# Verification record
+# Verification
 
-Verified on **30 October 2026 (Asia/Kolkata)**. Live observations are samples, not guarantees about later portal state.
+Checks run on 30 October 2026, Asia/Kolkata.
 
-## Automated checks
+## Local tests
 
-- **61 offline tests passed** on Python **3.14** in the development environment.
-- Installed the pinned development requirements and this package in a **fresh Python 3.12 environment**; **61 tests passed** there as well.
-- `ruff check .` and `ruff format --check .` passed.
-- `openapi-spec-validator` accepted the generated OpenAPI 3.1 document.
-- Regenerating `openapi.json` produced no Git diff. Tests also compare the checked-in schema to the runtime schema.
-- The current Starlette test client emits one third-party deprecation warning about HTTPX. No warnings were hidden; no tests failed.
-- CI is configured for Python 3.11, 3.12 and 3.13. Hosted CI was **not** run during local verification; local evidence covers 3.12 and 3.14 only.
+All 61 offline tests passed on Python 3.14 and again after installing the pinned dependencies in a fresh Python 3.12 environment. Ruff's lint and format checks passed. The OpenAPI validator accepted the schema, and regenerating `openapi.json` produced no diff.
 
-Offline cases cover login action/cookie handling, signature construction, session/key renewal, bounded authentication failures, transient failures, Retry-After, timeouts, malformed JSON and key payloads, transformer pagination, truncated/duplicate export rejection, cache expiry and concurrent cold reads, filters and geographic search, missing hierarchy codes, aliases/multiple parents, invalid/duplicate timestamps, missing/zero/invalid readings, register resets, gaps, API authentication, input validation and schema drift.
+Starlette's test client emitted one deprecation warning about HTTPX. It didn't affect the test results. CI is configured for Python 3.11, 3.12 and 3.13; hosted CI wasn't part of these local checks.
 
-## Live portal checks
+The tests cover session cookies, login failures, export signatures and key renewal, retries, `Retry-After`, timeouts and malformed responses. They also exercise transformer pagination, incomplete or duplicate exports, concurrent cache reads and expiry, geographic filters, input validation, API keys and schema drift. Reading cases include zero, missing or invalid values, duplicate or invalid timestamps, gaps and resets. Network cases cover missing codes, aliases and multiple parents.
 
-The actual FastAPI application was exercised through its test client while its HTTPX adapter connected to the real portal. Successful checks included summary, filtered and paginated meter lists, details for one legacy and one v2 meter, readings for both, transformer pagination and the network graph.
+## Live checks
 
-| Observation | Result |
+The FastAPI test client exercised the application while HTTPX contacted the real portal. Summary, meter search, pagination, details, transformers and the network endpoint all returned successfully. Readings were checked for one legacy meter and one v2 meter.
+
+| Check | Result |
 | --- | --- |
 | Unique meters | 403 |
-| Transformers across both upstream pages | 40 |
-| Installation statuses | 238 Installed, 90 Faulty, 75 Decommissioned |
-| Source builds | 238 legacy, 165 v2 |
+| Transformers, across both portal pages | 40 |
+| Statuses | 238 Installed, 90 Faulty, 75 Decommissioned |
+| Builds | 238 legacy, 165 v2 |
 | Meters with missing hierarchy codes | 14 |
-| Reconstructed network nodes | 131 |
-| Multiple-parent node flags | 60 |
-| Provisional missing-code node flags | 12 |
-| Conflicting-name node flags | 1 |
-| Sampled readings, per meter | 337 |
-| Sampled window | 23 June 2026 23:30 through 30 June 2026 23:30, assumed Asia/Kolkata |
-| J100000 accepted interval consumption | 142.05 kWh across 336 intervals |
-| J100004 accepted interval consumption | 71.04 kWh across 336 intervals |
+| Network nodes | 131 |
+| Multiple-parent flags | 60 |
+| Provisional missing-code flags | 12 |
+| Name-conflict flags | 1 |
+| Readings per sampled meter | 337 |
+| Sample window | 23 June 2026 23:30 to 30 June 2026 23:30, assumed Asia/Kolkata |
+| J100000 interval sum | 142.05 kWh over 336 accepted intervals |
+| J100004 interval sum | 71.04 kWh over 336 accepted intervals |
 
-The final three extra meters were reachable through the API's full inventory query. DT-007 retained both observed names and all 13 associated meters. Actual session expiration, rate limiting and upstream outages were not induced live; mock tests cover the adapter's handling of them.
+The API could find the last three extra meters. DT-007 kept both of its names and all 13 associated meters. These are results from that snapshot, not expected constants in the code. Expiry, throttling and outages were tested with mocks rather than induced on the live portal.
 
-## Running server and browser
+## HTTP and browser check
 
-Started Uvicorn locally in synthetic mode on port 8765. HTTP requests to `/v1/summary` and `/v1/meters/DEMO-001/readings` returned the expected 12-meter inventory and 18.8 kWh of accepted interval consumption across 47 demo intervals. The browser rendered Swagger UI with the expected routes, schemas and optional API-key authorization control.
+Uvicorn ran locally in demo mode on port 8765. HTTP requests returned the expected 12-meter summary and 18.8 kWh across 47 valid demo intervals. Swagger rendered the routes, schemas and API-key control in the browser. The README uses port 8000 so the preview isn't needed to run the project.
 
-This preview is a local convenience, not a deployment. The README's commands run the application independently on port 8000.
+## Not checked
 
-## Not verified
+The Docker daemon wasn't available, so the container wasn't built or run. There was no performance benchmark or security audit, and readings weren't fetched for every meter. Historical date-range behavior is still unknown. This record covers local checks, not deployment or hosted CI.
 
-The Dockerfile is supplied, but a container build/run was not performed because the local Docker daemon was unavailable. No performance benchmark, security audit, exhaustive consumption crawl or arbitrary historical date-range contract was established. Public GitHub publishing and hosted CI are outside this verification record.
-
-## Reproduce
+## Run the checks again
 
 ```sh
 python -m pip install -r requirements-dev.lock
@@ -58,4 +52,4 @@ python scripts/export_openapi.py
 git diff --exit-code openapi.json
 ```
 
-For a fresh live observation, configure credentials locally and run `python scripts/smoke_live.py`. This script uses read routes and performs at most one readings fetch per source build after loading the catalog.
+For a live check, configure credentials in `.env` and run `python scripts/smoke_live.py`. It reads the catalog, then fetches one meter's readings per source build.

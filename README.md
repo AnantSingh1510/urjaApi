@@ -1,14 +1,12 @@
 # Urja Meter API
 
-A read-only HTTP API over the **Urja Meter Ops** smart-meter portal. Consumers get typed JSON for meter details, network membership, locations and recent energy readings without logging into the original website.
+A small FastAPI service for reading data from Urja Meter Ops. It exposes meter details, locations, network relationships and energy readings as JSON.
 
-The service uses the portal's normal session login and browser-accessible data routes. A signed bulk export supplies the complete meter catalog; transformer pages supply the directory; readings are fetched on demand. There is no browser automation at runtime.
+The portal has no documented API, but its web pages use JSON endpoints. This service logs in with the operator account and calls those endpoints directly. A bulk export provides the meter catalog, so there's no browser to run and no need to scrape each meter page.
 
-## Start here
+## Run it locally
 
-Requires **Python 3.11+**. Python 3.12 is recommended. No database, paid service or API key is needed for the synthetic demo.
-
-From this repository's root:
+Use Python 3.11 or newer. The setup below starts with synthetic data, so you can try it without portal credentials. Python 3.12 is the recommended version.
 
 ```sh
 python3 -m venv .venv
@@ -19,57 +17,58 @@ cp .env.example .env
 uvicorn urja_api.app:app --host 127.0.0.1 --port 8000
 ```
 
-Open [interactive API documentation](http://127.0.0.1:8000/docs), or try:
+Open [Swagger UI](http://127.0.0.1:8000/docs), or make a request:
 
 ```sh
 curl 'http://127.0.0.1:8000/v1/meters?status=Installed&limit=2'
-curl 'http://127.0.0.1:8000/v1/meters/DEMO-001'
 curl 'http://127.0.0.1:8000/v1/meters/DEMO-001/readings?limit=2'
 ```
 
-The copied environment file selects **synthetic demo mode**, with 12 clearly named demo meters. Every response identifies `freshness.source` as `synthetic_demo`. Demo data is generated locally; it is not a downloaded copy of portal data.
+The demo generates 12 meters locally. Responses identify them with `freshness.source: "synthetic_demo"`; they aren't copies of portal records. There's no database or paid service to set up.
 
-### Connect to the real portal
+### Use the live portal
 
-Edit `.env`:
+Change these values in `.env`, using the credentials from the assignment:
 
 ```dotenv
 URJA_DEMO=false
-URJA_USERNAME=<username supplied with the assignment>
-URJA_PASSWORD=<password supplied with the assignment>
+URJA_USERNAME=<operator email>
+URJA_PASSWORD=<password>
 ```
 
-Restart the server, then:
+Restart the server, then try:
 
 ```sh
 curl 'http://127.0.0.1:8000/v1/summary'
-curl 'http://127.0.0.1:8000/v1/meters?q=J100000'
+curl 'http://127.0.0.1:8000/v1/meters/J100000'
 curl 'http://127.0.0.1:8000/v1/meters/J100000/readings?limit=2'
 ```
 
-The initial data request logs in and loads the catalog. No credentials are committed. `.env` is ignored by Git and Docker. Live mode fails at startup if credentials are absent; it never silently substitutes demo data.
+The first data request logs in and loads the catalog. Live mode requires credentials and won't fall back to demo data. Git and Docker both ignore `.env`.
 
-Set `URJA_API_KEY` to protect `/v1` routes and pass `X-API-Key: <your-key>` on requests. The local default has no key. The OpenAPI security scheme and Swagger **Authorize** button support this header. Bind to localhost for local evaluation. A public deployment additionally needs TLS, authorization appropriate to its users, and ingress rate limiting.
+For access beyond localhost, set `URJA_API_KEY` and send it in the `X-API-Key` header. Swagger's Authorize button accepts the same key. The key protects `/v1` routes; `/healthz` remains public. A public deployment would also need TLS, user authorization and ingress rate limits.
 
-## API
+## Endpoints
 
-| Method and route | Purpose |
+| Route | Returns |
 | --- | --- |
-| `GET /healthz` | Process liveness; no portal request |
-| `GET /v1/summary` | Inventory counts, status/make breakdowns and issue counts |
-| `GET /v1/meters` | Search and filter the full inventory |
-| `GET /v1/meters/{meter_id}` | Nameplate, coordinates, hierarchy and quality issues |
-| `GET /v1/meters/{meter_id}/readings` | Normalized registers and valid interval consumption |
-| `GET /v1/transformers` | Paginated complete transformer directory |
-| `GET /v1/network` | Observed hierarchy graph, aliases and inconsistencies |
-| `GET /openapi.json` | Generated OpenAPI 3.1 contract |
+| `GET /healthz` | Process status, without contacting the portal |
+| `GET /v1/summary` | Meter and transformer counts, status/make breakdowns, issue counts |
+| `GET /v1/meters` | Filtered, paginated meters |
+| `GET /v1/meters/{meter_id}` | Nameplate, location, hierarchy and any data issues |
+| `GET /v1/meters/{meter_id}/readings` | Cumulative registers and calculated interval consumption |
+| `GET /v1/transformers` | Paginated transformer directory |
+| `GET /v1/network` | Network nodes, parent relationships and conflicts |
+| `GET /openapi.json` | OpenAPI 3.1 schema |
 | `GET /docs` | Swagger UI |
 
-The checked-in [openapi.json](openapi.json) is generated from the same routes and models used at runtime. [PROTOCOL.md](PROTOCOL.md) documents the original portal, while [REFLECTION.md](REFLECTION.md) explains the implementation process. [VERIFICATION.md](VERIFICATION.md) records checks and their limits.
+[openapi.json](openapi.json) is generated from the application. [PROTOCOL.md](PROTOCOL.md) explains the portal calls and the quirks found during investigation. The [reflection](REFLECTION.md) covers assumptions and trade-offs; [verification notes](VERIFICATION.md) record what was tested.
 
-### Query examples
+### Search and nearby meters
 
-`q` matches a meter ID or serial substring. `make`, `status`, `phase`, and `transformer_code` are case-insensitive exact filters. Filters combine with AND and apply before pagination.
+`q` searches meter IDs and serial numbers by substring. The other text filters (`make`, `status`, `phase`, `transformer_code`) use case-insensitive exact matches. All supplied filters must match.
+
+These examples use live data:
 
 ```sh
 curl --get 'http://127.0.0.1:8000/v1/meters' \
@@ -79,19 +78,19 @@ curl --get 'http://127.0.0.1:8000/v1/meters' \
 curl --get 'http://127.0.0.1:8000/v1/meters' \
   --data-urlencode 'latitude=26.9' --data-urlencode 'longitude=75.8' \
   --data-urlencode 'radius_km=5'
-
-curl --get 'http://127.0.0.1:8000/v1/meters/J100000/readings' \
-  --data-urlencode 'start=2026-06-24T00:00:00+05:30' \
-  --data-urlencode 'end=2026-06-24T23:30:00+05:30'
 ```
 
-The three geographic parameters must be supplied together. Distances use the haversine formula. Results sort by distance then ID for geographic queries, otherwise by ID. `offset` is zero-based; catalog `limit` defaults to 50 and is capped at 200. A page beyond the end is an empty list with the correct total. Snapshot refreshes may move offset boundaries; stable cross-refresh cursors are not implemented.
+Nearby search needs all three geographic parameters. It uses haversine distance and sorts by distance, then meter ID. Other searches sort by ID. Filtering happens before pagination: `offset` starts at zero, and `limit` defaults to 50 with a maximum of 200. An offset past the last result returns an empty list and the full matching count.
 
-### Readings are cumulative registers
+Pagination uses the cached catalog. If that catalog refreshes between requests, page boundaries can move; there are no snapshot cursors.
 
-The portal returns kWh/kVAh values that increase over time. This service exposes them as `cumulative_kwh` and `cumulative_kvah`. It computes `interval_kwh` only when adjacent, unique timestamps are exactly 30 minutes apart, both kWh values are valid, and the register has not decreased. Zero is a valid reading. Missing values, malformed timestamps, duplicate timestamps, gaps and resets are preserved or flagged; no consumption is invented to fill a gap.
+### Energy readings
 
-A typical demo reading excerpt:
+The portal's kWh and kVAh values look like cumulative registers. Adding those values would give the wrong consumption figure. The API keeps them as `cumulative_kwh` and `cumulative_kvah`, then calculates `interval_kwh` from adjacent readings.
+
+A delta is only calculated when both kWh values are valid, their timestamps are unique and exactly 30 minutes apart, and the register hasn't decreased. Zero counts as a valid value. Gaps, missing values, duplicate timestamps and resets are flagged instead of filled in.
+
+For example, the second demo reading is:
 
 ```json
 {
@@ -105,70 +104,82 @@ A typical demo reading excerpt:
 }
 ```
 
-`start` and `end` are inclusive, require timezone offsets, and filter the **already available portal default window**. They do not request additional history. `available_from` and `available_to` show that window. The first filtered reading has no delta. Summaries cover the entire filtered window before pagination; `valid_interval_kwh` is a sum of accepted deltas, not a total of register values or a claim of complete billed consumption. Readings use a default limit of 500, capped at 2,000. A page after the first can legitimately start with a delta computed against a preceding row outside that page.
+You can filter the returned window with inclusive `start` and `end` timestamps. Both need a timezone offset:
 
-Portal timestamps have no timezone. `Asia/Kolkata` is an explicit assumption based on the Jaipur network; `URJA_PORTAL_TIMEZONE` can change it. Register interpretation and cadence are also observed assumptions, not vendor guarantees.
+```sh
+curl --get 'http://127.0.0.1:8000/v1/meters/J100000/readings' \
+  --data-urlencode 'start=2026-06-24T00:00:00+05:30' \
+  --data-urlencode 'end=2026-06-24T23:30:00+05:30'
+```
 
-### Network quality
+These filters don't fetch older history. `available_from` and `available_to` show the window the portal actually returned. In the live samples, that window ended on June 30 even though the investigation happened in October.
 
-Node identity is `(level, code)`. Nodes expose all observed names and parent IDs, so consumers can inspect a graph without accepting an incorrect tree. Missing-code identities are provisional hashes of the level's parent identity and label; no code is inferred from a name. `meter_count` is distinct meters observed at that node. Names from the transformer directory are retained as additional aliases. Directory-versus-meter feeder disagreements are flagged, without inserting invented edges.
+The first filtered reading has no delta. `valid_interval_kwh` sums accepted deltas across the filtered window before pagination, so it can exclude periods with bad data. It isn't a billing total. Readings default to 500 rows per page, with a maximum of 2,000; a later page may start with a delta calculated against the previous page's last row. Rows with invalid timestamps are retained without date filters and excluded when those filters are present.
 
-The graph includes entities observed along meter paths, not an authoritative inventory of all possible network assets. All directory transformers remain accessible through `/v1/transformers`, including any without a meter.
+The portal supplies no timezone. The service assumes `Asia/Kolkata` based on the Jaipur network; you can change it with `URJA_PORTAL_TIMEZONE`. The register interpretation and 30-minute cadence also come from the sampled data.
 
-## Structure and trade-offs
+## How it's put together
 
 ```text
 urja_api/
-  app.py         HTTP routes, validation, errors, API-key check, OpenAPI
-  portal.py      Cookie session, HMAC export, bounded retries and renewal
-  normalize.py   Meter/readings normalization, distances and network graph
-  service.py     Complete catalog snapshots and bounded readings cache
-  models.py      Public response schemas
-  config.py      Environment configuration and secret fields
-  demo.py        Deterministic synthetic portal substitute
-scripts/         OpenAPI generation and opt-in live verification
-tests/           Offline protocol, service, normalization and HTTP tests
+  app.py         Routes, validation, API-key checks and error responses
+  portal.py      Login, cookies, export signatures and retries
+  normalize.py   Meter/readings parsing, network graph and distances
+  service.py     Catalog index and caches
+  models.py      Response models and OpenAPI schemas
+  config.py      Environment settings
+  demo.py        Synthetic data
+scripts/         Schema export and live smoke check
+tests/           Offline tests
 ```
 
-```mermaid
-flowchart LR
-    Consumer --> API[FastAPI]
-    API --> Service[Query and cache layer]
-    Service --> Client[Portal client]
-    Client --> Portal[Urja session and read routes]
-    Portal --> Normalize[Normalization and quality checks]
-    Normalize --> Service
+FastAPI routes call the service layer, which reads from its cache or fetches through the portal client. Normalization happens before a new catalog enters the cache.
+
+HTTPX handles the portal session. Using its JSON routes avoids a browser dependency, and the bulk export gives the same fields for legacy and v2 meters. The two detail-page formats therefore don't need separate parsers here.
+
+The export must contain its stated number of rows, with unique meter IDs. Transformer pages are fetched until their stated total is reached. A partial or inconsistent response fails the refresh. Reads across these endpoints aren't a portal-side transaction, though, so a concurrent edit could still produce a mismatch.
+
+The catalog stays in memory, indexed by meter ID. Searches scan it. That's a reasonable trade-off for 403 meters; around 100,000, full exports, linear searches and a copy per worker would need measuring. That number is an estimate, not a benchmark. SQLite would be a straightforward next step for a local service, or PostgreSQL/PostGIS for larger spatial queries and multiple workers.
+
+### Caching and failures
+
+The catalog expires after five minutes. Readings expire after one minute, and the cache keeps at most 128 meters using LRU eviction. TTLs use a monotonic clock. `fetched_at` and `expires_at` describe the cache; they don't tell you how recent the measurements are.
+
+An expired entry waits for a refresh. If the refresh fails, the request returns an error. The old catalog is only replaced after the new one passes validation. Locks let concurrent callers share a refresh, and portal requests run one at a time. Use one worker for this project: caches are per process.
+
+GET requests get up to two retries for transient failures, with `Retry-After` respected. An authentication or signature rejection gets one session/key renewal. Login itself isn't retried for transient errors. HTTP requests and refresh stages have deadlines, so a failed portal call can't wait indefinitely. Cookies and signing secrets stay in memory.
+
+Errors follow this shape:
+
+```json
+{"error":{"code":"not_found","message":"Meter does not exist.","request_id":"..."}}
 ```
 
-**HTTP over browser automation.** The browser's own JavaScript reveals the necessary read protocol. A persistent HTTPX client is smaller, faster and easier to test than an automated browser. The observed bulk export already normalizes both legacy and v2 nameplates, avoiding brittle HTML parsing and an extra request per meter.
+Status codes are 401 for an invalid service key, 404 for a missing resource, 422 for invalid input, 502 for portal authentication or protocol problems, 503 for temporary unavailability, and 504 for a timeout. Responses include `X-Request-ID` and `Cache-Control: no-store`. Portal error bodies and credentials aren't passed through to callers.
 
-**Full export with validation.** One signed export returned all 403 meters in the inspected instance. The adapter requires `total == len(data)` and unique IDs before installing a snapshot. It fails clearly if the upstream switches to a partial response; it does not guess an export pagination contract. Transformer pages are traversed explicitly and their totals checked. Multiple endpoint reads are not an atomic transaction at the portal, so a concurrent upstream edit could still create a cross-endpoint inconsistency.
+### Network relationships
 
-**Simple local query layer.** An in-memory ID index supports direct lookups; collection filters scan the snapshot. This is appropriate for hundreds or a few thousand meters. Around 100,000 meters, full JSON materialization, O(N) scans, network serialization and per-worker copies would warrant measurement and likely replacement with a persistent indexed catalog. The next step would be SQLite for one local process or PostgreSQL/PostGIS for concurrent spatial queries, plus a background sync job. That threshold is a planning estimate, not a benchmark.
+The graph identifies nodes by `(level, code)` and keeps every observed name and parent. Missing codes get provisional IDs based on the parent and label. This avoids guessing that two similarly named nodes are the same asset.
 
-**Freshness is explicit.** Catalogs live for 300 seconds; per-meter readings for 60 seconds, with an LRU cap of 128 meters. TTLs use a monotonic clock. Response timestamps describe fetch time and expiry, not the source measurement's freshness. Expiry triggers a blocking refresh; a failed refresh returns an error instead of silently serving stale data. A new catalog is published only after all components pass validation. Locks coalesce concurrent cold requests, and upstream traffic is serialized to keep the portal load modest. Each process has its own caches; run one worker for this take-home.
+`meter_count` counts distinct meters at each node. Transformer-directory names become aliases, and feeder disagreements are reported. The service doesn't choose a "correct" parent or repair the source data. The graph covers paths seen on meters; `/v1/transformers` still returns directory entries that have no meters.
 
-**Bounded recovery.** The client retries transient GET failures at most twice after the initial attempt, handles `Retry-After`, and renews the session and signing key once after an authentication/signature rejection. Login itself is not transiently retried. HTTP operations have finite timeouts and catalog/readings refresh stages have overall deadlines. Unexpected bodies become a controlled error. Session cookies and export secrets stay in process memory.
+## Configuration
 
-**Errors.** Responses use `{ "error": { "code", "message", "request_id" } }`. Invalid input is 422, a missing meter is 404, service API-key failure is 401, portal protocol/authentication failure is 502, temporary unavailability is 503, and timeouts are 504. Error responses do not relay portal bodies or credentials. Every response has an `X-Request-ID`; data is marked `Cache-Control: no-store` for downstream clients.
-
-### Configuration
-
-| Variable | Default | Meaning |
+| Variable | Default | Purpose |
 | --- | --- | --- |
-| `URJA_DEMO` | `false` in code; `true` in the example file | Explicit synthetic mode |
-| `URJA_BASE_URL` | `https://urja-ops.flockenergy.tech` | HTTPS portal origin |
-| `URJA_USERNAME`, `URJA_PASSWORD` | empty | Required in live mode |
-| `URJA_API_KEY` | empty | Optional key protecting all `/v1` routes |
+| `URJA_DEMO` | `false`; the example file sets `true` | Use synthetic data |
+| `URJA_BASE_URL` | `https://urja-ops.flockenergy.tech` | Portal origin, HTTPS only |
+| `URJA_USERNAME`, `URJA_PASSWORD` | empty | Required for live mode |
+| `URJA_API_KEY` | empty | Protect `/v1` routes |
 | `URJA_CATALOG_TTL_SECONDS` | `300` | Catalog cache lifetime |
-| `URJA_READINGS_TTL_SECONDS` | `60` | Per-meter readings cache lifetime |
-| `URJA_PORTAL_TIMEZONE` | `Asia/Kolkata` | Assumed timezone for source timestamps |
+| `URJA_READINGS_TTL_SECONDS` | `60` | Readings cache lifetime |
+| `URJA_PORTAL_TIMEZONE` | `Asia/Kolkata` | Timezone for portal timestamps |
 | `URJA_TIMEOUT_SECONDS` | `15` | HTTPX connect/read/write/pool timeout |
-| `URJA_OPERATION_TIMEOUT_SECONDS` | `60` | Deadline for a portal operation or refresh stage |
+| `URJA_OPERATION_TIMEOUT_SECONDS` | `60` | Portal operation or refresh-stage deadline |
 
-A readings request on a completely cold service can require both a catalog and readings refresh stage. These stage deadlines are separate. TLS verification remains enabled, redirects are not followed automatically, and the portal origin is fixed by configuration rather than accepted from API callers.
+A readings request with an empty cache may need a catalog refresh followed by a readings refresh. Each stage has its own deadline. TLS verification stays enabled, redirects aren't followed automatically, and callers can't change the portal origin through an API parameter.
 
-## Verification and development
+## Tests
 
 ```sh
 python -m pip install -r requirements-dev.lock
@@ -180,34 +191,29 @@ python scripts/export_openapi.py
 git diff --exit-code openapi.json
 ```
 
-Tests make **no network calls** and require no secrets. They cover the real protocol shape through mock HTTP transports, session renewal, HMAC signing, malformed responses, throttling, timeout recovery, completeness, cache expiry/concurrency, hierarchy conflicts and energy edge cases. CI runs the offline suite and checks OpenAPI drift. Dependency lock files record exact verified versions; `pyproject.toml` defines supported package ranges.
+The tests run offline without credentials. Mock HTTP responses cover login, signing, renewal and portal failures. The rest cover export completeness, caching, search, hierarchy conflicts and readings with missing values or resets. CI also checks that the committed OpenAPI file matches the application. The lock files pin the tested dependencies; `pyproject.toml` lists supported version ranges.
 
-For an explicit, low-volume live check with credentials in `.env`:
+To check the real portal, put credentials in `.env` and run:
 
 ```sh
 python scripts/smoke_live.py
 ```
 
-This performs a catalog read plus one readings request per source build. It prints summary counts, not credentials. It does not modify portal business data.
+This reads the catalog and one meter's readings per source build, then prints summary counts. It doesn't modify portal data or print credentials.
 
-Optional container setup:
+## Docker
 
 ```sh
 docker build -t urja-api .
 docker run --rm --env-file .env -p 127.0.0.1:8000:8000 urja-api
 ```
 
-The container runs as a non-root user. Container execution was not part of the local verification; see [VERIFICATION.md](VERIFICATION.md).
+The image runs as a non-root user. The Docker daemon wasn't available during local verification, so the build and run commands haven't been tested. See [VERIFICATION.md](VERIFICATION.md) for the checks that did run.
 
-## Scope and next steps
+## What's left out
 
-Included: all core API/documentation deliverables, complete bulk inventory, network reconstruction with quality flags, local filtering and nearby search, explicit cache freshness, bounded authentication recovery, offline demo, tests and CI.
+Swagger covers API exploration for now, so there's no custom frontend. There's also no database or background sync job at this dataset size. Writes are outside the assignment's scope, and the inconsistent hierarchy needs source clarification before automatic repairs would make sense.
 
-Intentionally omitted: a custom modern frontend (Swagger covers API exploration), arbitrary historical consumption retrieval (no verified date-range protocol), write operations (out of scope), automatic hierarchy repair (insufficient evidence), a database/background scheduler (unnecessary at this scale), and production tenant/user authorization (the assignment provides one operator account).
+Historical readings are the main functional gap: only the portal's default window is supported. The service also assumes one operator account and doesn't implement tenant or user authorization.
 
-With more time: verify date-window semantics through additional normal UI workflows; test more meters and real expiry behavior; add source timestamps, refresh metrics and request tracing; persist the catalog with spatial indexes; then build a small interface that makes hierarchy conflicts and missing intervals easy to inspect. A supported upstream API would ultimately be preferable to relying on undocumented portal routes.
-
-## Authorship and reflection
-
-This implementation was prepared with AI assistance, including investigation, coding and verification. [REFLECTION.md](REFLECTION.md) records that process accurately; it does not claim an unaided personal investigation. The assignment's guidance-only AI rule should be considered before submitting this implementation.
-
+Next, verify date-range requests and real session expiry, then check more meters for gaps and resets. Refresh metrics and source timestamps would help with operations. If the dataset grows, persistence and spatial indexes should come before a UI for exploring the network and readings. A supported upstream API would remove much of the maintenance risk in these undocumented routes.
